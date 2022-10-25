@@ -1,0 +1,170 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project name="validate">
+
+    <dirname property="imported.basedir" file="${ant.file.validate}"/>
+    <condition property="findbugs.home" value="${env.FINDBUGS_HOME}">
+        <isset property="env.FINDBUGS_HOME"/>
+    </condition>
+    <property name="tools" value="${imported.basedir}"/>
+
+    <path id="tools.classpath">
+        <pathelement path="${tools}"/>
+        <fileset dir="${tools}" includes="**/*.jar"/>
+    </path>
+
+    <target name="-pre-clean"/>
+    <target name="clean" depends="-pre-clean">
+        <echo>Deleting Output Files and Directories...</echo>
+        <delete dir="${outdir}"/>
+    </target>
+
+    <target name="clean-symlink">
+        <taskdef name="delsymlink" classname="net.sourceforge.symlink.ant.SymlinkTask">
+            <classpath refid="tools.classpath"/>
+        </taskdef>
+		<delsymlink/>
+    </target>
+
+	<target name="-post-validate"/>
+
+	<target name="validate" depends="compile,checkstyle,pmd,findbugs,-post-validate">
+        <antcall target="formatjava">
+            <param name="verifyOnly" value="true"/>
+        </antcall>
+        <antcall target="formatxml">
+            <param name="verifyOnly" value="true"/>
+        </antcall>
+    </target>
+
+    <!-- Reformat java source code -->
+    <target name="formatjava">
+        <property name="formatjava.excludes" value="${src.excludes}"/>
+
+        <taskdef name="formatjava" classname="net.sourceforge.formatter.ant.FormatTask">
+            <classpath refid="tools.classpath"/>
+        </taskdef>
+
+        <formatjava conventions="${tools}/formatter/conventions.xml"
+                verifyOnly="${verifyOnly}"
+                failOnError="false"
+                charset="UTF-8">
+            <fileset dir="${src}" excludes="${formatjava.excludes}"/>
+        </formatjava>
+    </target>
+
+    <!-- Reformat xml source code -->
+    <target name="formatxml">
+        <property name="xml.src" value="${src}"/>
+        <property name="formatxml.excludes" value="${src.excludes}"/>
+        <property name="sortAttribute" value=""/>
+
+        <taskdef name="formatxml" classname="net.sourceforge.formatter.ant.FormatXmlTask">
+            <classpath refid="tools.classpath"/>
+        </taskdef>
+
+        <formatxml verifyOnly="${verifyOnly}" failOnError="false" sortAttribute="${sortAttribute}">
+            <fileset dir="${xml.src}" excludes="${formatxml.excludes}"/>
+        </formatxml>
+    </target>
+
+    <target name="checkstyle" depends="compile">
+        <taskdef resource="com/puppycrawl/tools/checkstyle/ant/checkstyle-ant-task.properties">
+            <classpath refid="tools.classpath"/>
+        </taskdef>
+        <path id="checkstyle.libs">
+            <pathelement location="${outdir-classes}"/>
+            <path refid="project.classpath"/>
+        </path>
+        <pathconvert property="checkstyle.cp" refid="checkstyle.libs"/>
+
+        <checkstyle config="${tools}/checkstyle/checkstyle.xml"
+                failOnViolation="false"
+                failureProperty="checkstyle.warnings"
+                classpath="${checkstyle.cp}">
+            <fileset dir="${src}" excludes="${src.excludes}"/>
+            <formatter type="xml" toFile="${outdir}/checkstyle.xml"/>
+            <property key="checkstyle.suppressions.file"
+                    value="${tools}/checkstyle/suppressions.xml"/>
+        </checkstyle>
+
+        <xslt in="${outdir}/checkstyle.xml"
+              out="${outdir}/checkstyle.html"
+              style="${tools}/checkstyle/checkstyle.xsl"/>
+        <fail message="Error: Checkstyle violations found, please review checkstyle report.">
+            <condition>
+                <isset property="checkstyle.warnings"/>
+            </condition>
+        </fail>
+    </target>
+
+    <target name="findbugs" depends="compile" if="findbugs.home">
+        <taskdef name="findbugs" classname="edu.umd.cs.findbugs.anttask.FindBugsTask">
+            <classpath refid="tools.classpath"/>
+        </taskdef>
+        <findbugs home="${findbugs.home}"
+                jvmargs="-Xmx512M"
+                reportLevel="low"
+                output="html"
+                outputFile="${outdir}/findbugs.html"
+                excludeFilter="${tools}/findbugs/findbugs-exclude.xml"
+                warningsproperty="findbugs.warnings">
+            <auxClasspath>
+                <path>
+                    <path refid="project.classpath"/>
+                </path>
+            </auxClasspath>
+            <sourcePath path="${src}"/>
+            <class location="${outdir-classes}"/>
+        </findbugs>
+        <fail message="Error: Bugs found, please review findbugs report.">
+            <condition>
+                <isset property="findbugs.warnings"/>
+            </condition>
+        </fail>
+    </target>
+
+    <target name="pmd" depends="compile">
+        <property name="pmd.output" value="html"/>
+        <property name="pmd.excludes" value="${src.excludes}"/>
+
+        <taskdef name="pmd" classname="net.sourceforge.pmd.ant.PMDTask">
+            <classpath refid="tools.classpath"/>
+        </taskdef>
+
+        <pmd shortFilenames="true" failonerror="true" failOnRuleViolation="true">
+            <ruleset>pmd/pmd.xml</ruleset>
+            <formatter type="${pmd.output}" toFile="${outdir}/pmd.html"/>
+            <fileset dir="${src}" excludes="${pmd.excludes}">
+                <filename name="**/*.java"/>
+            </fileset>
+        </pmd>
+    </target>
+
+    <target name="sonar" depends="compile">
+        <property name="sonar.working.directory" value="${outdir}/sonar"/>
+        <property name="sonar.projectKey" value="com.expertise:${ant.project.name}"/>
+        <property name="sonar.projectName" value="com.expertise:${ant.project.name}"/>
+        <property name="sonar.projectVersion" value="1.0"/>
+        <property name="sonar.dynamicAnalysis" value="false"/>
+        <property name="sonar.java.source" value="1.6"/>
+        <property name="sonar.java.target" value="1.6"/>
+        <property name="sonar.host.url" value="http://localhost:9000"/>
+        <property name="sonar.exclusions" value="${src.excludes}"/>
+        <property name="sonar.findbugs.excludesFilters"
+                value="${tools}/findbugs/findbugs-exclude.xml"/>
+        <property name="sonar.sources" value="${src}"/>
+        <property name="sonar.binaries" value="${outdir-classes}"/>
+        <pathconvert pathsep="," property="sonar.libraries" refid="project.classpath"/>
+
+        <taskdef uri="antlib:org.sonar.ant" resource="org/sonar/ant/antlib.xml">
+            <classpath refid="tools.classpath"/>
+        </taskdef>
+
+        <mkdir dir="${outdir}/sonar"/>
+
+        <sonar:sonar xmlns:sonar="antlib:org.sonar.ant"/>
+
+        <delete dir="${outdir}/sonar"/>
+        <delete dir=".sonar"/>
+    </target>
+</project>
